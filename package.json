@@ -1,0 +1,33 @@
+{
+  "name": "teltonika-tracker",
+  "version": "1.0.0",
+  "description": "Standalone TCP server for Teltonika GPS AVL data (Codec 8)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test tests/unit/protocols/teltonika/imeiParser.test.js tests/unit/protocols/teltonika/codec8.test.js",
+    "lint": "eslint src tests || exit 0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "teltonika",
+    "gps",
+    "avl",
+    "codec8",
+    "tcp"
+  ],
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "crc": "^4.3.2",
+    "dotenv": "^16.4.7",
+    "mongoose": "^8.9.5",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.0.0"
+  }
+}

@@ -1,0 +1,19 @@
+'use strict';
+
+/**
+ * ✅ Stable application error codes (not HTTP status alone).
+ */
+const ERROR_CODES = Object.freeze({
+  CONFIG_INVALID: 'CONFIG_INVALID',
+  AUTH_REJECTED: 'AUTH_REJECTED',
+  PROTOCOL_ERROR: 'PROTOCOL_ERROR',
+  UNSUPPORTED_CODEC: 'UNSUPPORTED_CODEC',
+  VALIDATION_FAILED: 'VALIDATION_FAILED',
+  DB_ERROR: 'DB_ERROR',
+  BUFFER_OVERFLOW: 'BUFFER_OVERFLOW',
+  INTERNAL: 'INTERNAL',
+});
+
+module.exports = {
+  ERROR_CODES,
+};

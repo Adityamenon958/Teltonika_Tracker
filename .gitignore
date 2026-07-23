@@ -1,0 +1,44 @@
+node_modules/
+.env
+.env.development
+.env.production
+.env.local
+*.log
+logs/
+.DS_Store
+Thumbs.db
+coverage/
+.idea/
+.vscode/
+*.pem
+.pm2/
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# PM2
+.pm2/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Coverage
+coverage/
+
+# Temporary
+tmp/
+temp/
