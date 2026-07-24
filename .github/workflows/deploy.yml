@@ -1,0 +1,83 @@
+# =============================================================================
+# Deploy Teltonika-Tracker to Azure Ubuntu VM (SSH + PM2)
+# =============================================================================
+# Trigger : push to main
+# Method  : SSH into the VM, git pull, npm ci, pm2 restart + save
+# Secrets : HOST, USERNAME, PORT, SSH_PRIVATE_KEY
+# Notes   : Node/npm/pm2 are provided by NVM on the VM — load NVM first.
+#           script_stop: true fails the workflow on the first remote error.
+# =============================================================================
+
+name: Deploy to Azure VM
+
+on:
+  # Keep deploying automatically on every push to main
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: SSH Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      # -------------------------------------------------------------------------
+      # SSH deploy only — no local checkout/build needed.
+      # The VM already has a git clone at ~/Teltonika_Tracker.
+      # -------------------------------------------------------------------------
+      # Required GitHub Actions secrets:
+      #   HOST            - Azure VM public IP or DNS
+      #   USERNAME        - SSH login user (e.g. azureuser)
+      #   PORT            - SSH port (usually 22)
+      #   SSH_PRIVATE_KEY - Private key authorized on the VM
+      # -------------------------------------------------------------------------
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PORT }}
+          # Fail the workflow immediately if any remote command exits non-zero
+          script_stop: true
+          script: |
+            set -e
+
+            # Non-interactive SSH shells do not load NVM automatically.
+            # Source nvm.sh so node, npm, and pm2 resolve correctly.
+            echo "==> Loading NVM"
+            export NVM_DIR="$HOME/.nvm"
+            if [ -s "$NVM_DIR/nvm.sh" ]; then
+              . "$NVM_DIR/nvm.sh"
+            else
+              echo "ERROR: NVM not found at $NVM_DIR/nvm.sh"
+              exit 1
+            fi
+
+            # Use the default Node version configured in NVM (if any)
+            echo "==> Selecting Node version via NVM"
+            nvm use default || nvm use node
+
+            echo "==> Changing into project directory ~/Teltonika_Tracker"
+            cd ~/Teltonika_Tracker
+
+            # Pull latest code from main
+            echo "==> Pulling latest code from GitHub (origin/main)"
+            git pull origin main
+
+            # npm ci installs dependencies exactly as defined in package-lock.json
+            # and is the recommended command for CI/CD deployments.
+            echo "==> Installing dependencies with npm ci"
+            npm ci
+
+            # Restart the existing PM2 app process
+            echo "==> Restarting PM2 process Teltonika-Tracker"
+            pm2 restart Teltonika-Tracker
+
+            # Persist the PM2 process list so it survives a VM reboot
+            # (requires pm2 startup to have been configured once on the VM)
+            echo "==> Saving PM2 process list"
+            pm2 save
+
+            echo "==> Deployment completed successfully"
