@@ -10,6 +10,7 @@ const teltonikaConsts = require('../constants/teltonika');
 const { tryConsumeCodec12Frame } = require('../protocols/teltonika/codecs/codec12');
 const { authenticateImei } = require('../services/authService');
 const { ingestAvlRecords } = require('../services/avlIngestService');
+const { scheduleLiveModbusReadAfterAuth } = require('../services/modbusLiveVerify');
 const { ProtocolError } = require('../errors/ProtocolError');
 
 const STATE = Object.freeze({
@@ -43,6 +44,10 @@ class ConnectionHandler {
     this.buffer = new SocketBuffer({ maxBytes: deps.config.maxBufferBytes });
     this._processing = false;
     this._destroyed = false;
+    /** @type {NodeJS.Timeout | null} */
+    this._liveModbusTimer = null;
+    /** One-shot live Modbus verify per connection */
+    this._liveModbusScheduled = false;
 
     this.logger = childLogger({
       connectionId: this.connectionId,
@@ -195,7 +200,20 @@ class ConnectionHandler {
     });
 
     this._write(teltonika.buildLoginResponse(true));
-    this.logger.info('IMEI authenticated');
+    this.logger.info('tracker authenticated');
+
+    // ✅ Event-driven M1 live verify — only after auth + socket registered (once per connection)
+    if (!this._liveModbusScheduled) {
+      this._liveModbusScheduled = true;
+      this._liveModbusTimer = scheduleLiveModbusReadAfterAuth({
+        imei,
+        connectionId: this.connectionId,
+        modbusSession: this.modbusSession,
+        logger: this.logger,
+        delayMs: 4000,
+      });
+    }
+
     return true;
   }
 
@@ -340,6 +358,10 @@ class ConnectionHandler {
   _destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+    if (this._liveModbusTimer) {
+      clearTimeout(this._liveModbusTimer);
+      this._liveModbusTimer = null;
+    }
     if (this.imei && this.modbusSession) {
       this.modbusSession.notifySocketClosed(this.imei);
     }

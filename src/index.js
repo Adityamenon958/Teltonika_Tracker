@@ -24,30 +24,8 @@ async function main() {
   app = createApp(config);
   await app.start();
 
-  // ✅ Optional Milestone 1 live verify (same process as TCP server — needs online FMB125)
-  // Set MODBUS_LIVE_READ_IMEI=<15-digit IMEI> then restart; waits for tracker to authenticate.
-  if (process.env.MODBUS_LIVE_READ_IMEI) {
-    const liveImei = String(process.env.MODBUS_LIVE_READ_IMEI).trim();
-    const delayMs = Number(process.env.MODBUS_LIVE_READ_DELAY_MS || 15000);
-    logger.info({ imei: liveImei, delayMs }, 'Scheduled live Modbus Frequency read');
-    setTimeout(async () => {
-      try {
-        const result = await app.readConfiguredRegister(liveImei, 'pm2140', 'frequency');
-        logger.info(
-          {
-            imei: liveImei,
-            value: result.value,
-            unit: result.unit,
-            rawWords: result.rawWords,
-            durationMs: result.durationMs,
-          },
-          'LIVE Modbus Frequency read OK'
-        );
-      } catch (err) {
-        logger.error({ err, imei: liveImei }, 'LIVE Modbus Frequency read FAILED');
-      }
-    }, delayMs);
-  }
+  // Live Modbus verify is event-driven: triggered after IMEI auth in ConnectionHandler
+  // when process.env.MODBUS_LIVE_READ_IMEI matches the authenticated tracker.
 
   const shutdown = async (signal) => {
     if (shuttingDown) return;

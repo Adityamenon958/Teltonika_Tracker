@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test tests/unit/protocols/teltonika/imeiParser.test.js tests/unit/protocols/teltonika/codec8.test.js tests/unit/protocols/teltonika/codec12.test.js tests/unit/protocols/modbus/modbus.test.js tests/unit/tcp/frameClassifier.test.js tests/unit/tcp/registryIsolation.test.js tests/unit/tcp/connectionHandlerDrain.test.js tests/unit/services/modbusSession.test.js",
+    "test": "node --test tests/unit/protocols/teltonika/imeiParser.test.js tests/unit/protocols/teltonika/codec8.test.js tests/unit/protocols/teltonika/codec12.test.js tests/unit/protocols/modbus/modbus.test.js tests/unit/tcp/frameClassifier.test.js tests/unit/tcp/registryIsolation.test.js tests/unit/tcp/connectionHandlerDrain.test.js tests/unit/services/modbusSession.test.js tests/unit/services/modbusLiveVerify.test.js",
     "show:pm2140": "node scripts/show-pm2140-frequency-config.js",
     "lint": "eslint src tests || exit 0"
   },
