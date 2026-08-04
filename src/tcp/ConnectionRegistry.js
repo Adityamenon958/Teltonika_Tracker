@@ -2,7 +2,7 @@
 
 /**
  * ✅ Tracks active TCP connections by IMEI.
- * Foundation for future live online/offline monitoring.
+ * Foundation for live monitoring and Codec 12 Modbus writes.
  */
 class ConnectionRegistry {
   constructor() {
@@ -50,6 +50,21 @@ class ConnectionRegistry {
    */
   get(imei) {
     return this._byImei.get(String(imei)) || null;
+  }
+
+  /**
+   * Write raw bytes to an online tracker socket.
+   * @param {string} imei
+   * @param {Buffer} buffer
+   * @returns {boolean} false if offline/destroyed
+   */
+  write(imei, buffer) {
+    const entry = this.get(imei);
+    if (!entry || !entry.socket || entry.socket.destroyed) {
+      return false;
+    }
+    entry.socket.write(buffer);
+    return true;
   }
 
   /**

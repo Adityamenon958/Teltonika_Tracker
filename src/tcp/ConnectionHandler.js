@@ -2,11 +2,15 @@
 
 const crypto = require('crypto');
 const { SocketBuffer } = require('./SocketBuffer');
+const { classifyFrame } = require('./FrameClassifier');
 const { handleConnectionError, ConnectionAction } = require('../errors/errorHandler');
 const { childLogger } = require('../logger');
 const teltonika = require('../protocols/teltonika');
+const teltonikaConsts = require('../constants/teltonika');
+const { tryConsumeCodec12Frame } = require('../protocols/teltonika/codecs/codec12');
 const { authenticateImei } = require('../services/authService');
 const { ingestAvlRecords } = require('../services/avlIngestService');
+const { ProtocolError } = require('../errors/ProtocolError');
 
 const STATE = Object.freeze({
   WAIT_IMEI: 'WAIT_IMEI',
@@ -17,7 +21,7 @@ const STATE = Object.freeze({
 
 /**
  * ✅ Per-socket lifecycle + state machine.
- * Knows TCP + orchestration; does not know Mongo schemas.
+ * AVL path unchanged in semantics; Codec 12 is additive via FrameClassifier.
  */
 class ConnectionHandler {
   /**
@@ -25,12 +29,14 @@ class ConnectionHandler {
    * @param {{
    *   config: object,
    *   registry: import('./ConnectionRegistry').ConnectionRegistry,
+   *   modbusSession?: import('../services/modbusSessionService').ModbusSessionService,
    * }} deps
    */
   constructor(socket, deps) {
     this.socket = socket;
     this.config = deps.config;
     this.registry = deps.registry;
+    this.modbusSession = deps.modbusSession || null;
     this.connectionId = crypto.randomUUID();
     this.state = STATE.WAIT_IMEI;
     this.imei = null;
@@ -56,6 +62,7 @@ class ConnectionHandler {
   }
 
   /**
+   * ✅ Drain-safe: if data arrives during await, re-enter after current loop.
    * @param {Buffer} chunk
    */
   async _onData(chunk) {
@@ -65,11 +72,17 @@ class ConnectionHandler {
       this.buffer.append(chunk);
       this.logger.debug({ bytes: chunk.length, buffered: this.buffer.length }, 'Data received');
 
-      if (this._processing) return;
-      this._processing = true;
+      if (this._processing) {
+        this._needsDrain = true;
+        return;
+      }
 
+      this._processing = true;
       try {
-        await this._processBuffer();
+        do {
+          this._needsDrain = false;
+          await this._processBuffer();
+        } while (this._needsDrain && !this._destroyed);
       } finally {
         this._processing = false;
       }
@@ -79,9 +92,8 @@ class ConnectionHandler {
   }
 
   async _processBuffer() {
-    // Loop while complete packets are available
     // eslint-disable-next-line no-constant-condition
-    while (true) {
+    while (!this._destroyed) {
       if (this.state === STATE.WAIT_IMEI) {
         const progressed = await this._tryHandleImei();
         if (!progressed) break;
@@ -89,7 +101,7 @@ class ConnectionHandler {
       }
 
       if (this.state === STATE.AUTHED || this.state === STATE.RECEIVING_AVL) {
-        const progressed = await this._tryHandleAvl();
+        const progressed = await this._tryHandlePostAuthFrame();
         if (!progressed) break;
         continue;
       }
@@ -99,7 +111,60 @@ class ConnectionHandler {
   }
 
   /**
-   * @returns {Promise<boolean>} true if a packet was consumed
+   * AVL-first classification after auth.
+   * @returns {Promise<boolean>}
+   */
+  async _tryHandlePostAuthFrame() {
+    const buf = this.buffer.toBuffer();
+    if (buf.length === 0) {
+      return false;
+    }
+
+    const kind = classifyFrame(buf);
+
+    if (kind === 'NEED_MORE') {
+      return false;
+    }
+
+    // AVL has priority when identified as AVL
+    if (kind === 'AVL') {
+      return this._tryHandleAvl();
+    }
+
+    if (kind === 'CODEC12') {
+      return this._tryHandleCodec12();
+    }
+
+    // Ambiguous / IMEI-looking after auth — try AVL first (existing behavior safety)
+    if (kind === 'UNKNOWN' || kind === 'IMEI') {
+      // Attempt AVL; if incomplete, wait. Do not destroy for Modbus-looking noise yet.
+      try {
+        const frame = teltonika.tryConsumeAvlFrame(buf);
+        if (frame) {
+          return this._tryHandleAvl();
+        }
+      } catch (err) {
+        // If preamble invalid, try codec12 before failing hard
+        if (err instanceof ProtocolError) {
+          try {
+            const c12 = tryConsumeCodec12Frame(buf);
+            if (c12) {
+              return this._tryHandleCodec12();
+            }
+          } catch {
+            // fall through
+          }
+        }
+        throw err;
+      }
+      return false;
+    }
+
+    return false;
+  }
+
+  /**
+   * @returns {Promise<boolean>}
    */
   async _tryHandleImei() {
     const buf = this.buffer.toBuffer();
@@ -135,6 +200,7 @@ class ConnectionHandler {
   }
 
   /**
+   * Existing AVL path — semantics unchanged (ingest then ACK).
    * @returns {Promise<boolean>}
    */
   async _tryHandleAvl() {
@@ -155,12 +221,73 @@ class ConnectionHandler {
       records: decoded.records,
     });
 
-    // ACK only after successful durable write
+    // ACK only after successful durable write — never queued behind Modbus
     this._write(teltonika.buildRecordCountAck(storedCount));
     this.logger.info(
       { storedCount, codecId: decoded.codecId },
       'AVL packet processed and ACK sent'
     );
+
+    return true;
+  }
+
+  /**
+   * Codec 12 inbound — never fails AVL session on Modbus errors.
+   * @returns {Promise<boolean>}
+   */
+  async _tryHandleCodec12() {
+    const buf = this.buffer.toBuffer();
+    let frame;
+    try {
+      frame = tryConsumeCodec12Frame(buf);
+    } catch (err) {
+      // Bad Codec 12 framing: drop what we can / fail Modbus waiter, do not kill GPS by default
+      this.logger.warn({ err }, 'Codec 12 frame error (tracker stays connected)');
+      if (this.modbusSession && this.imei && typeof this.modbusSession.failPending === 'function') {
+        const { ModbusError, MODBUS_ERROR } = require('../protocols/modbus/errors');
+        this.modbusSession.failPending(
+          this.imei,
+          new ModbusError(
+            err.message || 'Codec 12 parse failed',
+            MODBUS_ERROR.CODEC12,
+            undefined,
+            true
+          )
+        );
+      }
+      // Consume nothing on CRC error — may desync. Attempt to skip one preamble frame if sized.
+      // Safer for M1: destroy only if irreparable — plan says last resort.
+      // If we cannot consume, leave bytes and wait — but CRC errors throw after full frame known.
+      // tryConsume throws after knowing totalSize — re-parse size and skip frame to resync.
+      if (buf.length >= 8) {
+        const dataSize = buf.readUInt32BE(4);
+        const total = 8 + dataSize + 4;
+        if (dataSize > 0 && buf.length >= total && total < this.config.maxBufferBytes) {
+          this.buffer.consume(total);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    if (!frame) {
+      return false;
+    }
+
+    this.buffer.consume(frame.bytesConsumed);
+
+    // ✅ Type 0x06 = serial/Modbus reply; deliver payload to Modbus session only
+    if (frame.type === teltonikaConsts.TYPE_RESPONSE && this.modbusSession && this.imei) {
+      const rawCodec12Hex = this.config.modbus?.debug
+        ? buf.subarray(0, frame.bytesConsumed).toString('hex')
+        : undefined;
+      this.modbusSession.handleInbound(this.imei, frame.payload, { rawCodec12Hex });
+    } else {
+      this.logger.debug(
+        { type: frame.type, payloadLen: frame.payload.length },
+        'Codec 12 frame ignored (not a Modbus response waiter)'
+      );
+    }
 
     return true;
   }
@@ -181,6 +308,9 @@ class ConnectionHandler {
   }
 
   _onClose() {
+    if (this.imei && this.modbusSession) {
+      this.modbusSession.notifySocketClosed(this.imei);
+    }
     this._cleanupRegistry();
     this.state = STATE.CLOSED;
     this.logger.info('Connection closed');
@@ -197,7 +327,7 @@ class ConnectionHandler {
       }
     }
 
-    // No ACK on failure — device will retry
+    // No AVL ACK on failure — device will retry
     this._destroy();
   }
 
@@ -210,6 +340,9 @@ class ConnectionHandler {
   _destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+    if (this.imei && this.modbusSession) {
+      this.modbusSession.notifySocketClosed(this.imei);
+    }
     this._cleanupRegistry();
     this.state = STATE.CLOSED;
     try {

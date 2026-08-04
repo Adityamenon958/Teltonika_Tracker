@@ -12,4 +12,8 @@ module.exports = {
   imeiAuthMode: 'strict',
   socketIdleTimeoutMs: 5 * 60 * 1000,
   maxBufferBytes: 1024 * 1024,
+  modbusResponseTimeoutMs: 8000,
+  modbusMaxRetries: 1,
+  modbusQueueMaxPerImei: 50,
+  modbusDebug: false,
 };

@@ -12,7 +12,15 @@ module.exports = Object.freeze({
 
   CODEC_8: 0x08,
   CODEC_8_EXTENDED: 0x8e,
+  CODEC_12: 0x0c,
+  CODEC_13: 0x0d,
   CODEC_16: 0x10,
+
+  /** Codec 12 type bytes */
+  TYPE_COMMAND: 0x05,
+  TYPE_RESPONSE: 0x06,
+  /** FMX125/FMB125: forward payload to RS232/RS485 */
+  TYPE_SERIAL_FORWARD: 0x0e,
 
   /** Typical IMEI length in digits */
   IMEI_MIN_LENGTH: 15,

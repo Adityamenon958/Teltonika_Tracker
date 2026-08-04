@@ -45,6 +45,17 @@ function buildConfig() {
     imeiAuthMode: (process.env.IMEI_AUTH_MODE || defaults.imeiAuthMode).toLowerCase(),
     socketIdleTimeoutMs: Number(process.env.SOCKET_IDLE_TIMEOUT_MS || defaults.socketIdleTimeoutMs),
     maxBufferBytes: Number(process.env.MAX_BUFFER_BYTES || defaults.maxBufferBytes),
+    modbus: Object.freeze({
+      responseTimeoutMs: Number(
+        process.env.MODBUS_RESPONSE_TIMEOUT_MS || defaults.modbusResponseTimeoutMs
+      ),
+      maxRetries: Number(process.env.MODBUS_MAX_RETRIES || defaults.modbusMaxRetries),
+      queueMaxPerImei: Number(
+        process.env.MODBUS_QUEUE_MAX_PER_IMEI || defaults.modbusQueueMaxPerImei
+      ),
+      debug:
+        String(process.env.MODBUS_DEBUG || defaults.modbusDebug).toLowerCase() === 'true',
+    }),
   });
 
   return config;

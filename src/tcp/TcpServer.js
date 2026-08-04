@@ -12,11 +12,13 @@ class TcpServer {
    * @param {{
    *   config: object,
    *   registry: import('./ConnectionRegistry').ConnectionRegistry,
+   *   modbusSession?: import('../services/modbusSessionService').ModbusSessionService,
    * }} deps
    */
   constructor(deps) {
     this.config = deps.config;
     this.registry = deps.registry;
+    this.modbusSession = deps.modbusSession || null;
     this.server = null;
     this.logger = getLogger();
   }
@@ -32,6 +34,7 @@ class TcpServer {
         new ConnectionHandler(socket, {
           config: this.config,
           registry: this.registry,
+          modbusSession: this.modbusSession,
         });
       });
 
