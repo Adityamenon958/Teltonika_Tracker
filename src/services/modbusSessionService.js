@@ -204,12 +204,44 @@ class ModbusSessionService {
       );
     }
 
+    // ✅ Temporary diagnostic only: MODBUS_DEBUG_FORCE_LENGTH overrides quantity for buildReadRequest.
+    // Unset the env var to restore original behavior. Does not change profile files or transport.
+    let requestRegisterCount = registerCount;
+    const forceLengthRaw = process.env.MODBUS_DEBUG_FORCE_LENGTH;
+    const forceOverrideActive =
+      forceLengthRaw !== undefined && String(forceLengthRaw).trim() !== '';
+    if (forceOverrideActive) {
+      const forced = Number(forceLengthRaw);
+      if (Number.isInteger(forced) && forced >= 1 && forced <= 125) {
+        requestRegisterCount = forced;
+      }
+    }
+
     const modbusFrame = buildReadRequest({
       slaveId,
       functionCode,
       registerAddress,
-      registerCount,
+      registerCount: requestRegisterCount,
     });
+
+    if (forceOverrideActive) {
+      this.logger.info(
+        {
+          originalQuantity: registerCount,
+          forcedQuantity: requestRegisterCount,
+          finalRtuRequest: modbusFrame.toString('hex'),
+          slaveId,
+          functionCode,
+          registerAddress,
+        },
+        '------------------------------------------------\n' +
+          'DEBUG OVERRIDE ENABLED\n' +
+          `Original Quantity: ${registerCount}\n` +
+          `Forced Quantity: ${requestRegisterCount}\n` +
+          `Final RTU Request: ${modbusFrame.toString('hex')}\n` +
+          '------------------------------------------------'
+      );
+    }
 
     const codec12Packet = buildCodec12Packet(modbusFrame, teltonika.TYPE_SERIAL_FORWARD);
     const timeoutMs = this.config.modbus?.responseTimeoutMs ?? 8000;
