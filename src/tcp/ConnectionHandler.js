@@ -48,6 +48,10 @@ class ConnectionHandler {
     this._liveModbusTimer = null;
     /** One-shot live Modbus verify per connection */
     this._liveModbusScheduled = false;
+    /** @type {string | null} last pre-classify diagnostic frame hex (dedupe only) */
+    this._lastPreClassifyDiagHex = null;
+    /** @type {number | null} */
+    this._lastPreClassifyDiagBufLen = null;
 
     this.logger = childLogger({
       connectionId: this.connectionId,
@@ -125,6 +129,9 @@ class ConnectionHandler {
       return false;
     }
 
+    // ✅ Diagnostic only: log every complete post-auth frame BEFORE classification
+    this._diagLogCompleteIncomingFrame(buf);
+
     const kind = classifyFrame(buf);
 
     if (kind === 'NEED_MORE') {
@@ -166,6 +173,66 @@ class ConnectionHandler {
     }
 
     return false;
+  }
+
+  /**
+   * ✅ Diagnostic only — does not parse, route, or consume.
+   * Logs a complete Teltonika-sized TCP frame (preamble + dataSize + CRC layout)
+   * once per unique frame hex before classifyFrame runs.
+   * @param {Buffer} buf
+   */
+  _diagLogCompleteIncomingFrame(buf) {
+    // Common Teltonika TCP envelope: 4 zero preamble + 4 dataSize + data + 4 CRC
+    if (!Buffer.isBuffer(buf) || buf.length < 9) {
+      return;
+    }
+
+    const preamble = buf.readUInt32BE(0);
+    if (preamble !== teltonikaConsts.AVL_PREAMBLE) {
+      return;
+    }
+
+    const dataSize = buf.readUInt32BE(4);
+    if (dataSize <= 0 || dataSize > teltonikaConsts.MAX_DATA_FIELD_LENGTH) {
+      return;
+    }
+
+    const totalFrameLength = 8 + dataSize + 4;
+    if (buf.length < totalFrameLength) {
+      return;
+    }
+
+    const frame = buf.subarray(0, totalFrameLength);
+    const frameHex = frame.toString('hex');
+
+    // Dedupe only while the same unconsumed bytes remain (length + hex).
+    // After consume, length changes so a later identical frame still logs.
+    if (
+      this._lastPreClassifyDiagHex === frameHex &&
+      this._lastPreClassifyDiagBufLen === buf.length
+    ) {
+      return;
+    }
+    this._lastPreClassifyDiagHex = frameHex;
+    this._lastPreClassifyDiagBufLen = buf.length;
+
+    const codecByte = frame.length >= 9 ? frame.readUInt8(8) : undefined;
+
+    this.logger.info(
+      {
+        imei: this.imei,
+        connectionId: this.connectionId,
+        totalFrameLength,
+        fullFrameHex: frameHex,
+        first16BytesHex: frame.subarray(0, Math.min(16, frame.length)).toString('hex'),
+        codecByteDecimal: codecByte,
+        codecByteHex:
+          codecByte === undefined
+            ? undefined
+            : `0x${codecByte.toString(16).padStart(2, '0')}`,
+      },
+      'Incoming complete TCP frame before classification (diagnostic)'
+    );
   }
 
   /**
