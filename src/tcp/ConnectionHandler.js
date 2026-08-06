@@ -294,6 +294,21 @@ class ConnectionHandler {
 
     this.buffer.consume(frame.bytesConsumed);
 
+    // ✅ Diagnostic only: log every parsed Codec12 frame before type filtering
+    const rawFrameHex = buf.subarray(0, frame.bytesConsumed).toString('hex');
+    this.logger.info(
+      {
+        imei: this.imei,
+        codecId: 0x0c,
+        frameTypeDecimal: frame.type,
+        frameTypeHex: `0x${Number(frame.type).toString(16).padStart(2, '0')}`,
+        payloadLength: frame.payload.length,
+        codec12FrameHex: rawFrameHex,
+        payloadHex: frame.payload.toString('hex'),
+      },
+      'Codec12 frame parsed (diagnostic)'
+    );
+
     // ✅ Type 0x06 = serial/Modbus reply; deliver payload to Modbus session only
     if (frame.type === teltonikaConsts.TYPE_RESPONSE && this.modbusSession && this.imei) {
       const rawCodec12Hex = this.config.modbus?.debug
